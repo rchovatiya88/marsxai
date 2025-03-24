@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>A-Frame YUKA FPS Prototype</title>
+    <!-- A-Frame and YUKA libraries -->
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/yuka@0.7.8/build/yuka.min.js"></script>
+    <!-- (Optional) Ammo.js if physics is required -->
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/ammo.js/0.0.10/ammo.js"></script> -->
+    <!-- Include custom components -->
+    <script src="fps-camera.js"></script>
+    <script src="fps-shoot.js"></script>
+    <script src="yuka-behavior.js"></script>
+</head>
+
+<body>
+    <a-scene game-manager>
+        <!-- Ground -->
+        <a-plane position="0 0 0" rotation="-90 0 0" width="50" height="50" color="#7BC8A4"></a-plane>
+
+        <!-- Player Entity with FPS camera, shooting and a crosshair (if desired) -->
+        <a-entity id="player" fps-camera position="0 1.6 0">
+            <a-camera wasd-controls look-controls>
+                <!-- Optionally attach a crosshair entity -->
+                <a-entity geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.015" material="color: black; shader: flat" position="0 0 -1"></a-entity>
+            </a-camera>
+            <!-- Attach shooting component -->
+            <a-entity fps-shoot></a-entity>
+        </a-entity>
+
+        <!-- Simple Obstacles / Environment -->
+        <a-box position="-5 0.5 0" width="1" height="1" depth="1" color="#4CC3D9"></a-box>
+        <a-box position="5 0.5 0" width="1" height="1" depth="1" color="#4CC3D9"></a-box>
+        <a-box position="0 0.5 5" width="1" height="1" depth="1" color="#4CC3D9"></a-box>
+        <a-box position="0 0.5 -5" width="1" height="1" depth="1" color="#4CC3D9"></a-box>
+
+        <!-- Enemy entities with YUKA behavior -->
+        <a-entity yuka-behavior="team: red" position="5 0.5 -5" geometry="primitive: box" material="color: red"></a-entity>
+        <a-entity yuka-behavior="team: red" position="-5 0.5 5" geometry="primitive: box" material="color: red"></a-entity>
+    </a-scene>
+</body>
+
+</html>

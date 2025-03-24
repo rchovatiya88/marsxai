@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>A-Frame Yuka FPS Game</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- A-Frame library -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <!-- Yuka library for AI -->
+    <script src="https://cdn.jsdelivr.net/npm/yuka@0.7.0/build/yuka.min.js"></script>
+    <!-- Custom game logic -->
+    <script src="main.js"></script>
+</head>
+
+<body>
+    <a-scene game-manager>
+        <!-- Ground Plane -->
+        <a-plane position="0 0 0" rotation="-90 0 0" width="50" height="50" color="#7BC8A4">
+        </a-plane>
+
+        <!-- Obstacles -->
+        <a-box class="obstacle" position="-5 0.5 0" width="1" height="1" depth="1" color="#4CC3D9">
+        </a-box>
+        <a-box class="obstacle" position="5 0.5 0" width="1" height="1" depth="1" color="#4CC3D9">
+        </a-box>
+        <a-box class="obstacle" position="0 0.5 5" width="1" height="1" depth="1" color="#4CC3D9">
+        </a-box>
+        <a-box class="obstacle" position="0 0.5 -5" width="1" height="1" depth="1" color="#4CC3D9">
+        </a-box>
+
+        <!-- Player with Camera -->
+        <a-entity id="player" position="0 1.6 0">
+            <a-camera look-controls wasd-controls>
+                <a-entity id="gun" gltf-model="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/Wep_Assault_01.glb?v=1664927688925" position="0.3 -0.3 -0.5" rotation="0 90 0"></a-entity>
+                <a-sphere id="bullet" radius="0.05" color="blue" position="0 0 -10" visible="false">
+                    <a-animation attribute="position" dur="2000" easing="linear" to="0 0 -60" begin="start-shooting"></a-animation>
+                </a-sphere>
+            </a-camera>
+        </a-entity>
+    </a-scene>
+</body>
+
+</html>

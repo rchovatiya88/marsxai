@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Battle Scene with A-Frame and YUKA</title>
+    <script src="https://cdn.jsdelivr.net/npm/yuka@0.7.8/build/yuka.min.js"></script>
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+</head>
+
+<body>
+    <a-scene battle-manager>
+        <a-plane position="0 0 0" rotation="-90 0 0" width="100" height="100" color="#7BC8A4"></a-plane>
+        <a-sky color="#ECECEC"></a-sky>
+    </a-scene>
+    <script>
+        AFRAME.registerComponent('battle-manager', {
+            init: function() {
+                this.redEntities = [];
+                this.blueEntities = [];
+                const scene = this.el;
+
+                // Create 30 red boxes (enemies)
+                for (let i = 0; i < 30; i++) {
+                    let redBox = document.createElement('a-box');
+                    redBox.setAttribute('class', 'red-box');
+                    redBox.setAttribute('color', 'red');
+                    let x = Math.random() * 20 - 10;
+                    let z = Math.random() * 20 - 10;
+                    redBox.setAttribute('position', {
+                        x,
+                        y: 0.5,
+                        z
+                    });
+                    redBox.setAttribute('yuka-behavior', 'team: red');
+                    scene.appendChild(redBox);
+                    this.redEntities.push(redBox);
+                }
+
+                // Create 30 blue balls (good guys)
+                for (let i = 0; i < 30; i++) {
+                    let blueBall = document.createElement('a-sphere');
+                    blueBall.setAttribute('class', 'blue-ball');
+                    blueBall.setAttribute('color', 'blue');
+                    blueBall.setAttribute('radius', '0.5');
+                    let x = Math.random() * 20 - 10;
+                    let z = Math.random() * 20 - 10;
+                    blueBall.setAttribute('position', {
+                        x,
+                        y: 0.5,
+                        z
+                    });
+                    blueBall.setAttribute('yuka-behavior', 'team: blue');
+                    scene.appendChild(blueBall);
+                    this.blueEntities.push(blueBall);
+                }
+            },
+            tick: function() {
+                // Check for collisions
+                let toRemove = [];
+                for (let red of this.redEntities) {
+                    for (let blue of this.blueEntities) {
+                        let distance = red.object3D.position.distanceTo(blue.object3D.position);
+                        if (distance < 1.5) {
+                            toRemove.push([red, blue]);
+                        }
+                    }
+                }
+                // Remove colliding pairs
+                for (let pair of toRemove) {
+                    let [red, blue] = pair;
+                    if (this.redEntities.includes(red) && this.blueEntities.includes(blue)) {
+                        this.redEntities = this.redEntities.filter(e => e !== red);
+                        this.blueEntities = this.blueEntities.filter(e => e !== blue);
+                        red.parentNode.removeChild(red);
+                        blue.parentNode.removeChild(blue);
+                    }
+                }
+            }
+        });
+
+        // Custom pursue behavior - simplified version of YUKA's pursue behavior
+        class CustomPursueBehavior extends YUKA.SteeringBehavior {
+            constructor(target) {
+                super();
+                this.target = target;
+                this.predictTime = 1; // prediction time in seconds
+            }
+
+            calculate(vehicle, force) {
+                if (!this.target) return force;
+
+                // predicted future position of the target
+                const direction = this.target.position.clone().sub(vehicle.position);
+                const distance = direction.length();
+                const speed = vehicle.getSpeed();
+
+                // adjust prediction time based on distance
+                let prediction = this.predictTime;
+                if (speed > 0) {
+                    prediction = Math.min(distance / speed, this.predictTime);
+                }
+
+                // calculate target position
+                const predictedPosition = this.target.position.clone();
+                if (this.target.velocity) {
+                    predictedPosition.add(this.target.velocity.clone().multiplyScalar(prediction));
+                }
+
+                // seek to the predicted position
+                force.add(this._seek(vehicle, predictedPosition));
+
+                return force;
+            }
+
+            _seek(vehicle, targetPosition) {
+                const desiredVelocity = targetPosition.clone().sub(vehicle.position).normalize();
+                desiredVelocity.multiplyScalar(vehicle.maxSpeed);
+
+                return desiredVelocity.sub(vehicle.velocity);
+            }
+        }
+
+        // Custom flee behavior - simplified version of YUKA's flee behavior
+        class CustomFleeBehavior extends YUKA.SteeringBehavior {
+            constructor(target) {
+                super();
+                this.target = target;
+                this.panicDistance = 10; // panic when closer than this
+            }
+
+            calculate(vehicle, force) {
+                if (!this.target) return force;
+
+                const desiredVelocity = vehicle.position.clone().sub(this.target).normalize();
+                const distance = vehicle.position.distanceTo(this.target);
+
+                // only flee if within panic distance
+                if (distance <= this.panicDistance) {
+                    const scale = YUKA.MathUtils.clamp(1.0 - distance / this.panicDistance, 0, 1);
+                    desiredVelocity.multiplyScalar(vehicle.maxSpeed * scale);
+                    force.add(desiredVelocity.sub(vehicle.velocity));
+                }
+
+                return force;
+            }
+        }
+
+        AFRAME.registerComponent('yuka-behavior', {
+            schema: {
+                team: {
+                    type: 'string'
+                }
+            },
+            init: function() {
+                // Initialize YUKA vehicle
+                this.vehicle = new YUKA.Vehicle();
+                this.vehicle.position.copy(this.el.object3D.position);
+                this.vehicle.maxSpeed = 3;
+
+                // Determine opponent team
+                this.opponentsTeam = this.data.team === 'red' ? 'blue' : 'red';
+
+                // Set initial mood (aggressive or scared)
+                this.mood = Math.random() < 0.5 ? 'aggressive' : 'scared';
+
+                // Create steering behaviors
+                this.pursueBehavior = new CustomPursueBehavior(new YUKA.Vehicle()); // Dummy target
+                this.fleeBehavior = new CustomFleeBehavior(new YUKA.Vector3()); // Use Vector3 as target position
+                this.vehicle.steering.add(this.pursueBehavior);
+                this.vehicle.steering.add(this.fleeBehavior);
+
+                // Set initial behavior weights
+                this.updateWeights();
+
+                // Timers for behavior updates
+                this.targetUpdateTime = 0.5; // Update target every 0.5 seconds
+                this.moodUpdateTime = 5; // Check mood switch every 5 seconds
+                this.targetTimer = 0;
+                this.moodTimer = 0;
+            },
+            tick: function(time, delta) {
+                delta = delta / 1000; // Convert to seconds
+
+                // Update timers
+                this.targetTimer += delta;
+                this.moodTimer += delta;
+
+                // Update target if timer is up
+                if (this.targetTimer >= this.targetUpdateTime) {
+                    this.updateTarget();
+                    this.targetTimer = 0;
+                }
+
+                // Switch mood with 50% probability if timer is up
+                if (this.moodTimer >= this.moodUpdateTime) {
+                    if (Math.random() < 0.5) {
+                        this.mood = this.mood === 'aggressive' ? 'scared' : 'aggressive';
+                        this.updateWeights();
+                    }
+                    this.moodTimer = 0;
+                }
+
+                // Update vehicle position
+                this.vehicle.update(delta);
+                this.el.object3D.position.copy(this.vehicle.position);
+            },
+            updateTarget: function() {
+                // Find nearest opponent
+                let opponents = document.querySelectorAll(`.${this.opponentsTeam}-box, .${this.opponentsTeam}-ball`);
+                if (opponents.length === 0) return;
+
+                let minDist = Infinity;
+                let nearest = null;
+                let myPos = this.el.object3D.position;
+
+                opponents.forEach(opponent => {
+                    let oppPos = opponent.object3D.position;
+                    let dist = myPos.distanceTo(oppPos);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = opponent;
+                    }
+                });
+
+                if (nearest) {
+                    if (nearest.components['yuka-behavior'] && nearest.components['yuka-behavior'].vehicle) {
+                        this.pursueBehavior.target = nearest.components['yuka-behavior'].vehicle;
+                    }
+                    this.fleeBehavior.target = nearest.object3D.position;
+                }
+            },
+            updateWeights: function() {
+                if (this.mood === 'aggressive') {
+                    this.pursueBehavior.weight = 1;
+                    this.fleeBehavior.weight = 0;
+                } else {
+                    this.pursueBehavior.weight = 0;
+                    this.fleeBehavior.weight = 1;
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

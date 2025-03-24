@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Zombie Robot FPS - A-Frame Version</title>
+    <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/yuka@0.7.8/dist/yuka.min.js"></script>
+    <script src="components/player-component.js"></script>
+    <script src="components/zombie-component.js"></script>
+    <script src="components/weapon-component.js"></script>
+    <script src="components/world-component.js"></script>
+    <script src="components/level-component.js"></script>
+    <script src="components/navmesh-component.js"></script>
+    <script src="components/ui-component.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: Monospace;
+            font-size: 13px;
+            line-height: 24px;
+            overscroll-behavior: none;
+        }
+        
+        #game-ui {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 999;
+        }
+        
+        #health {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
+        
+        #level-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            color: white;
+            font-size: 20px;
+            text-align: center;
+            line-height: 20px;
+        }
+        
+        #loading-screen {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        #intro {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+        }
+        
+        #intro.hidden {
+            display: none;
+        }
+        
+        button {
+            background: transparent;
+            border: 1px solid white;
+            color: white;
+            padding: 10px 20px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        
+        #outOfBounce {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px;
+            background-color: rgba(255, 0, 0, 0.5);
+            color: white;
+            border-radius: 5px;
+            display: none;
+        }
+        
+        #level-transition {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 5em;
+            color: #ADD8E6;
+            text-shadow: 1px 1px 2px rgb(193, 17, 17), 0 0 1em blue, 0 0 0.2em rgb(193, 17, 17);
+            display: none;
+        }
+        
+        .blinking {
+            animation: blinkingBackground 2s infinite;
+        }
+        
+        @keyframes blinkingBackground {
+            0% {
+                background-color: rgba(255, 165, 0, 0.5);
+            }
+            25% {
+                background-color: rgba(255, 0, 0, 0.5);
+            }
+            50% {
+                background-color: rgba(255, 165, 0, 0.5);
+            }
+            75% {
+                background-color: rgba(255, 0, 0, 0.5);
+            }
+            100% {
+                background-color: rgba(255, 165, 0, 0.5);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loading-screen">
+        <div>Loading game assets...</div>
+    </div>
+
+    <div id="intro">
+        <h1>Zombie Robot FPS</h1>
+        <p>WASD to move | SPACE to jump | CLICK to shoot</p>
+        <p>Save the planet from the Failure Robots!</p>
+        <button id="start-button">Start Game</button>
+        <div id="gameover" style="display: none;">
+            <p>Game Over</p>
+            <p>You've stopped <span id="gameover_hits">0</span> robots.</p>
+            <p>You've reached level <span id="gameover_level">1</span>.</p>
+        </div>
+    </div>
+
+    <div id="game-ui">
+        <div id="crosshair">+</div>
+        <div id="health">Health: <span id="health-value">100</span></div>
+        <div id="level-info">
+            Level: <span id="level-value">1</span> | Robots Destroyed: <span id="hits-value">0</span>
+        </div>
+    </div>
+
+    <div id="outOfBounce" class="blinking">👻 OUT of BOUNDARY = HEALTH DOWN 👻</div>
+    <div id="level-transition">Level 1</div>
+
+    <a-scene world-manager physics="debug: false" loading-screen="enabled: false">
+        <a-assets>
+            <!-- <a-asset-item id="world-model" src="assets/mesh/worldZombie.glb"></a-asset-item>
+            <a-asset-item id="navmesh-model" src="assets/mesh/navMesh.glb"></a-asset-item>
+            <a-asset-item id="zombie-model" src="assets/mesh/walkAttackOut.glb"></a-asset-item>
+            <a-asset-item id="raygun-model" src="assets/mesh/rayGun.glb"></a-asset-item>
+
+            <audio id="shot-sound" src="assets/audio/blast.mp3" preload="auto"></audio>
+            <audio id="out-sound" src="assets/audio/out.mp3" preload="auto"></audio>
+            <audio id="background-sound" src="assets/audio/baseSong.mp3" preload="auto"></audio> -->
+        </a-assets>
+
+        <!-- Player -->
+        <a-entity id="player" player-component="speed: 5" position="0 1.6 0">
+            <a-entity id="camera" camera look-controls wasd-controls="enabled: false" position="0 0 0">
+                <a-entity id="weapon" weapon-component="type: RayGun" position="0.2 -0.2 -0.3"></a-entity>
+                <a-entity id="weapon-fx"></a-entity>
+            </a-entity>
+        </a-entity>
+
+        <!-- Game level -->
+        <a-entity id="world" gltf-model="#world-model"></a-entity>
+
+        <!-- NavMesh (invisible helper) -->
+        <a-entity id="navmesh" navmesh-component="visualize: false" gltf-model="#navmesh-model" visible="false"></a-entity>
+
+        <!-- Level manager -->
+        <a-entity id="level-manager" level-component="startLevel: 1; maxZombies: 20"></a-entity>
+
+        <!-- Sky -->
+        <a-sky color="#88CCEE"></a-sky>
+
+        <!-- Lights -->
+        <a-light type="ambient" color="#BBB" intensity="0.5"></a-light>
+        <a-light type="directional" color="#FFF" intensity="1" position="-1 1 1"></a-light>
+    </a-scene>
+
+    <script>
+        // Basic UI handling
+        document.getElementById('start-button').addEventListener('click', function() {
+            document.getElementById('intro').classList.add('hidden');
+            // Enable the camera controls - will be handled by the player component
+            const playerEl = document.getElementById('player');
+            playerEl.emit('start-game', {});
+        });
+
+        // Loading screen handling
+        window.addEventListener('load', function() {
+            // Hide loading screen once all assets loaded
+            document.querySelector('a-scene').addEventListener('loaded', function() {
+                document.getElementById('loading-screen').style.display = 'none';
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Enhanced A-Frame FPS</title>
+    <!-- Core A-Frame -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <!-- THREE.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Environment Component -->
+    <script src="https://unpkg.com/aframe-environment-component@1.3.2/dist/aframe-environment-component.min.js"></script>
+    <!-- Physics System -->
+    <script src="https://cdn.jsdelivr.net/gh/n5ro/aframe-physics-system@v4.0.1/dist/aframe-physics-system.min.js"></script>
+    <!-- Yuka AI -->
+    <script src="https://cdn.jsdelivr.net/npm/yuka@0.7.8/build/yuka.min.js"></script>
+    <!-- Movement Controls -->
+    <script src="https://unpkg.com/aframe-extras@7.0.0/dist/aframe-extras.min.js"></script>
+
+    <style>
+        .hud {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-family: Arial;
+            font-size: 24px;
+            z-index: 999;
+            text-shadow: 2px 2px 4px black;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            transform: translate(-50%, -50%);
+            z-index: 999;
+            color: white;
+            font-size: 20px;
+            text-align: center;
+        }
+
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            font-family: Arial;
+            font-size: 24px;
+        }
+
+        #debug-log {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-family: monospace;
+            font-size: 12px;
+            z-index: 9999;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="loading-screen" class="loading-screen">Loading Game Assets...</div>
+    <div id="debug-log"></div>
+    <div class="hud">
+        Score: <span id="score">0</span> | Health: <span id="health">100</span> | Ammo: <span id="ammo">30</span>
+    </div>
+    <div class="crosshair">+</div>
+
+    <a-scene 
+        physics="driver: local; debug: true;" 
+        renderer="antialias: true; colorManagement: true;"
+        loading-screen="dotsColor: white; backgroundColor: black"
+        debug>
+
+        <!-- Assets -->
+        <a-assets timeout="30000">
+            <a-asset-item id="level" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/MoonX_Level%201.glb?v=1665639231993"></a-asset-item>
+            <a-asset-item id="navmesh" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/MoonX_Level1_Navmesh.glb?v=1665639232893"></a-asset-item>
+            <a-asset-item id="gun" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/Wep_Assault_01.glb?v=1664927688925"></a-asset-item>
+            <a-asset-item id="enemy" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/Baka_v2-v1.glb?v=1664956996404"></a-asset-item>
+            <audio id="gunshot" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/laser1.mp3"></audio>
+            <audio id="hit" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/hit1.mp3"></audio>
+            <audio id="reload" src="https://cdn.glitch.global/a0f42b6b-5748-4de7-8b7f-f072c068f79e/reload1.mp3"></audio>
+        </a-assets>
+
+        <!-- Environment -->
+        <a-sky color="#000000"></a-sky>
+        <a-entity environment="preset: starry; groundColor: #445; groundTexture: none; lighting: none; shadow: false; dressing: false;"></a-entity>
+        
+        <!-- Level -->
+        <a-entity id="level-model" gltf-model="#level" position="0 0 0"></a-entity>
+        <a-entity id="navmesh-entity" gltf-model="#navmesh" visible="false"></a-entity>
+
+        <!-- Lights -->
+        <a-entity light="type: ambient; intensity: 0.5"></a-entity>
+        <a-entity light="type: directional; intensity: 0.8; castShadow: true" position="1 1 1"></a-entity>
+
+        <!-- Player -->
+        <a-entity id="player" position="0 1.6 0">
+            <a-camera id="camera" look-controls="pointerLockEnabled: true" wasd-controls>
+                <a-entity id="weapon" 
+                    position="0.3 -0.3 -0.5" 
+                    rotation="0 90 0" 
+                    scale="0.5 0.5 0.5"
+                    gltf-model="#gun"
+                    animation__shoot="property: rotation; to: 0 90 -10; dur: 50; easing: easeOutQuad; startEvents: shoot"
+                    animation__reload="property: position; to: 0.3 -0.5 -0.3; dur: 200; dir: alternate; easing: easeInOutQuad; startEvents: reload">
+                </a-entity>
+            </a-camera>
+        </a-entity>
+
+        <!-- Enemy Spawner -->
+        <a-entity id="enemy-spawner"></a-entity>
+    </a-scene>
+
+    <script>
+        // Debug logging function
+        function debugLog(message) {
+            const debugEl = document.getElementById('debug-log');
+            const log = document.createElement('div');
+            log.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            debugEl.appendChild(log);
+            console.log(message);
+            
+            // Keep only last 10 messages
+            while (debugEl.children.length > 10) {
+                debugEl.removeChild(debugEl.firstChild);
+            }
+        }
+
+        // Scene and asset loading
+        const scene = document.querySelector('a-scene');
+        const loadingScreen = document.getElementById('loading-screen');
+        
+        debugLog('Initializing game...');
+
+        // Asset loading events
+        const assets = document.querySelector('a-assets');
+        assets.addEventListener('loaded', function() {
+            debugLog('All assets loaded successfully');
+        });
+
+        assets.addEventListener('timeout', function() {
+            debugLog('Asset loading timed out');
+        });
+
+        // Track individual asset loading
+        document.querySelectorAll('a-asset-item').forEach(item => {
+            item.addEventListener('loaded', function() {
+                debugLog(`Asset loaded: ${item.id}`);
+            });
+
+            item.addEventListener('error', function(e) {
+                debugLog(`Error loading asset ${item.id}: ${e.detail.message || 'Unknown error'}`);
+            });
+        });
+
+        // Scene loading events
+        scene.addEventListener('loaded', function () {
+            debugLog('Scene loaded');
+            loadingScreen.style.display = 'none';
+        });
+
+        scene.addEventListener('renderstart', function () {
+            debugLog('Render started');
+        });
+
+        // Error handling
+        window.addEventListener('error', function(e) {
+            debugLog(`Error: ${e.message}`);
+        });
+
+        // Initialize game state
+        const gameState = {
+            score: 0,
+            health: 100,
+            ammo: 30,
+            maxAmmo: 30,
+            canShoot: true,
+            isReloading: false
+        };
+
+        // Basic shooting mechanics
+        const camera = document.getElementById('camera');
+        camera.addEventListener('click', function() {
+            if (gameState.ammo > 0 && !gameState.isReloading) {
+                gameState.ammo--;
+                document.getElementById('ammo').textContent = gameState.ammo;
+                document.getElementById('weapon').emit('shoot');
+                document.getElementById('gunshot').play();
+            }
+        });
+
+        // Reload mechanic
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'r' && !gameState.isReloading && gameState.ammo < gameState.maxAmmo) {
+                gameState.isReloading = true;
+                document.getElementById('weapon').emit('reload');
+                document.getElementById('reload').play();
+                
+                setTimeout(() => {
+                    gameState.ammo = gameState.maxAmmo;
+                    gameState.isReloading = false;
+                    document.getElementById('ammo').textContent = gameState.ammo;
+                }, 1500);
+            }
+        });
+    </script>
+</body>
+</html>

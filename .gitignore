@@ -1,0 +1,30 @@
+# Ignore everything by default
+*
+# But keep directories
+!*/
+# But not these directories
+.git/
+node_modules/
+**/node_modules/
+.vscode/
+
+# Only include these file types
+!*.js
+!*.jsx
+!*.ts
+!*.tsx
+!*.html
+!*.css
+!*.scss
+!*.json
+!*.md
+!*.txt
+!*.yaml
+!*.yml
+!*.xml
+!*.svg
+!.gitignore
+!package.json
+!package-lock.json
+!tsconfig.json
+!*.config.js
