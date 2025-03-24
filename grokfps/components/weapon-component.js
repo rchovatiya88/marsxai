@@ -420,3 +420,41 @@ AFRAME.registerComponent('weapon-component', {
         }
     }
 });
+
+AFRAME.registerComponent('bullet-component', {
+    init: function() {
+        this.velocity = new THREE.Vector3(this.el.getAttribute('velocity'));
+        this.startTime = Date.now();
+    },
+
+    tick: function() {
+        try {
+            // Update position
+            const pos = this.el.object3D.position;
+            const deltaTime = (Date.now() - this.startTime) * 0.001; // Convert to seconds
+            pos.addScaledVector(this.velocity, deltaTime);
+
+            // Check for collisions with enemies
+            const bulletBox = new THREE.Box3().setFromObject(this.el.object3D);
+            const enemies = document.querySelectorAll('[enemy-component]');
+            for (let enemy of enemies) {
+                const enemyBox = new THREE.Box3().setFromObject(enemy.object3D);
+                if (bulletBox.intersectsBox(enemyBox)) {
+                    // Handle enemy hit - apply damage, effects, etc
+                    enemy.components['enemy-component'].takeDamage(25); // Adjust damage as needed
+                    this.el.parentNode.removeChild(this.el); // Destroy bullet on hit
+                    return;
+                }
+            }
+
+            // Destroy bullet after certain time or distance  
+            const weaponData = document.querySelector('[weapon-component]').components['weapon-component'].data;
+            if (Date.now() - this.startTime > weaponData.bulletLifespan ||
+                pos.distanceTo(new THREE.Vector3()) > weaponData.bulletMaxDistance) {
+                this.el.parentNode.removeChild(this.el);
+            }
+        } catch (error) {
+            console.error('Error in bullet tick:', error);
+        }
+    }
+});
