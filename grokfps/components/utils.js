@@ -28,8 +28,20 @@
             createParticles: function() {
                 const group = new THREE.Group();
                 const count = this.data.particleCount;
-                const size = this.data.size;
-                const colors = this.data.color.split(',').map(c => c.trim());
+                const size = typeof this.data.size === 'number' ? this.data.size : parseFloat(this.data.size);
+                
+                // Handle color as either a single color or a comma-separated list
+                let colors = [];
+                if (typeof this.data.color === 'string') {
+                    if (this.data.color.includes(',')) {
+                        colors = this.data.color.split(',').map(c => c.trim());
+                    } else {
+                        colors = [this.data.color.trim()];
+                    }
+                } else {
+                    colors = ['#fff']; // Default fallback
+                }
+                
                 const directionVector = new THREE.Vector3(this.data.directionVector.x, this.data.directionVector.y, this.data.directionVector.z);
                 const spread = this.data.spread;
                 for (let i = 0; i < count; i++) {
