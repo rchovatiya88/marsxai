@@ -5,10 +5,17 @@ AFRAME.registerComponent('enemy-component', {
         attackPower: { type: 'number', default: 10 },
         attackRate: { type: 'number', default: 1 },
         detectionRange: { type: 'number', default: 20 },
-        attackRange: { type: 'number', default: 2 }
+        attackRange: { type: 'number', default: 2 },
+        weaponDamage: { type: 'number', default: 15 },
+        weaponCooldown: { type: 'number', default: 2 },
+        weaponAccuracy: { type: 'number', default: 0.7 },
+        weaponRange: { type: 'number', default: 50 }
     },
     init: function() {
         try {
+            this.lastEnemyShot = 0;
+            this.weaponRaycaster = new THREE.Raycaster();
+
             this.health = this.data.health;
             this.maxHealth = this.data.health;
             this.isDead = false;
@@ -21,7 +28,10 @@ AFRAME.registerComponent('enemy-component', {
             this.stuckThreshold = 2000;
             this.lastPosition = new THREE.Vector3();
 
-            // Move this up before createEnemyModel
+            this.minSeparationDistance = 2.0;
+            this.separationForce = 5.0;
+            this.nearbyEnemies = [];
+
             this.hitboxSize = { width: 1.2, height: 1.8, depth: 1.2 };
 
             this.createEnemyModel();
@@ -33,11 +43,202 @@ AFRAME.registerComponent('enemy-component', {
                 gameManager.components['game-manager'].registerEnemy(this);
             }
 
-            // Add explicit hitbox for better detection
             this.hitbox = new THREE.Box3();
-            this.updateHitbox(); // Initial update
+            this.updateHitbox();
         } catch (error) {
             console.error('Error initializing enemy component:', error);
+        }
+    },
+    getDistanceTo: function(otherEnemy) {
+        const myPos = this.el.object3D.position;
+        const otherPos = otherEnemy.object3D.position;
+        return new THREE.Vector3()
+            .subVectors(myPos, otherPos)
+            .length();
+    },
+    updateCollisionAvoidance: function() {
+        try {
+            const enemies = document.querySelectorAll('[enemy-component]');
+            this.nearbyEnemies = [];
+
+            enemies.forEach(enemy => {
+                if (enemy !== this.el) {
+                    const distance = this.getDistanceTo(enemy);
+                    if (distance < this.minSeparationDistance) {
+                        this.nearbyEnemies.push({ enemy, distance });
+                    }
+                }
+            });
+
+            this.nearbyEnemies.forEach(({ enemy, distance }) => {
+                const enemyPos = enemy.object3D.position;
+                const myPos = this.el.object3D.position;
+
+                const pushDirection = new THREE.Vector3()
+                    .subVectors(myPos, enemyPos)
+                    .normalize();
+
+                const pushMagnitude = (this.minSeparationDistance - distance) * this.separationForce;
+
+                this.vehicle.position.x += pushDirection.x * pushMagnitude * 0.1;
+                this.vehicle.position.z += pushDirection.z * pushMagnitude * 0.1;
+            });
+        } catch (error) {
+            console.error('Error in collision avoidance:', error);
+        }
+    },
+    enemyShoot: function() {
+        try {
+            const now = performance.now();
+            const timeSinceLastShot = now - this.lastEnemyShot;
+
+            if (timeSinceLastShot < this.data.weaponCooldown * 1000) {
+                return false;
+            }
+
+            const playerPos = this.playerEntity.object3D.position;
+            const enemyPos = this.el.object3D.position;
+            const distance = new THREE.Vector3(playerPos.x - enemyPos.x, 0, playerPos.z - enemyPos.z).length();
+
+            if (distance <= this.data.weaponRange) {
+                const direction = new THREE.Vector3()
+                    .subVectors(playerPos, enemyPos)
+                    .normalize();
+
+                const accuracySpread = 1.0 - this.data.weaponAccuracy;
+                direction.x += (Math.random() - 0.5) * accuracySpread * 0.2;
+                direction.y += (Math.random() - 0.5) * accuracySpread * 0.2;
+                direction.normalize();
+
+                this.weaponRaycaster.set(enemyPos, direction);
+                this.weaponRaycaster.far = this.data.weaponRange;
+
+                const intersects = this.weaponRaycaster.intersectObject(this.playerEntity.object3D, true);
+
+                if (intersects.length > 0) {
+                    this.lastEnemyShot = now;
+                    this.createEnemyShootEffect(enemyPos, direction);
+
+                    if (this.playerEntity.components['player-component']) {
+                        this.playerEntity.components['player-component'].takeDamage(this.data.weaponDamage);
+                    }
+
+                    return true;
+                }
+            }
+            return false;
+        } catch (error) {
+            console.error('Error in enemy shooting:', error);
+            return false;
+        }
+    },
+    createEnemyShootEffect: function(position, direction) {
+        try {
+            const muzzleFlash = document.createElement('a-entity');
+            muzzleFlash.setAttribute('position', position);
+            muzzleFlash.setAttribute('particle-system', {
+                preset: 'dust',
+                particleCount: 10,
+                color: '#f00,#900',
+                size: 0.1,
+                duration: 0.1,
+                direction: 'normal',
+                velocity: 0.5
+            });
+            document.querySelector('a-scene').appendChild(muzzleFlash);
+
+            const scene = document.querySelector('a-scene').object3D;
+            const material = new THREE.LineBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
+            const endPoint = new THREE.Vector3()
+                .copy(position)
+                .add(direction.multiplyScalar(this.data.weaponRange));
+            const geometry = new THREE.BufferGeometry().setFromPoints([position, endPoint]);
+            const line = new THREE.Line(geometry, material);
+            scene.add(line);
+
+            setTimeout(() => {
+                if (muzzleFlash.parentNode) {
+                    muzzleFlash.parentNode.removeChild(muzzleFlash);
+                }
+                scene.remove(line);
+                line.geometry.dispose();
+                line.material.dispose();
+            }, 100);
+
+            this.playEnemyShootSound();
+        } catch (error) {
+            console.error('Error creating enemy shoot effect:', error);
+        }
+    },
+    playEnemyShootSound: function() {
+        try {
+            const context = new(window.AudioContext || window.webkitAudioContext)();
+            const oscillator = context.createOscillator();
+            const gainNode = context.createGain();
+
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(300, context.currentTime);
+
+            gainNode.gain.setValueAtTime(0.05, context.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, context.currentTime + 0.1);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(context.destination);
+
+            oscillator.start();
+            oscillator.stop(context.currentTime + 0.1);
+        } catch (error) {
+            console.error('Error playing enemy shoot sound:', error);
+        }
+    },
+    updateAI: function(dt) {
+        try {
+            if (this.isDead) return;
+            if (!this.playerEntity || !this.playerEntity.object3D) return;
+
+            const playerPos = this.playerEntity.object3D.position;
+            const enemyPos = this.el.object3D.position;
+            const distance = new THREE.Vector3(playerPos.x - enemyPos.x, 0, playerPos.z - enemyPos.z).length();
+
+            this.updateCollisionAvoidance();
+
+            if (distance <= this.data.detectionRange) {
+                if (distance <= this.data.attackRange) {
+                    if (this.currentState !== 'attack') {
+                        this.setState('attack');
+                    }
+
+                    this.enemyShoot();
+
+                    this.attackPlayer();
+
+                    this.seekBehavior.active = false;
+                    this.separationBehavior.active = false;
+                } else {
+                    if (this.currentState !== 'chase') {
+                        this.setState('chase');
+                    }
+                    this.seekBehavior.target.copy(new YUKA.Vector3(playerPos.x, 0, playerPos.z));
+                    this.seekBehavior.active = true;
+                    this.separationBehavior.active = true;
+                }
+            } else {
+                if (this.currentState !== 'idle') {
+                    this.setState('idle');
+                }
+                this.seekBehavior.active = false;
+                this.separationBehavior.active = false;
+            }
+
+            this.el.object3D.position.x = this.vehicle.position.x;
+            this.el.object3D.position.z = this.vehicle.position.z;
+
+            if ((this.currentState === 'chase' || this.currentState === 'attack') && distance > 0.1) {
+                const lookAt = new THREE.Vector3(playerPos.x, enemyPos.y, playerPos.z);
+                this.el.object3D.lookAt(lookAt);
+            }
+        } catch (error) {
+            console.error('Error updating enhanced AI:', error);
         }
     },
     createEnemyModel: function() {
@@ -70,13 +271,12 @@ AFRAME.registerComponent('enemy-component', {
             rightEye.setAttribute('position', '0.15 1.85 0.25');
             this.el.appendChild(rightEye);
 
-            // Add hitbox helper (visible during development)
             const hitboxHelper = document.createElement('a-box');
             hitboxHelper.setAttribute('width', this.hitboxSize.width);
             hitboxHelper.setAttribute('height', this.hitboxSize.height);
             hitboxHelper.setAttribute('depth', this.hitboxSize.depth);
             hitboxHelper.setAttribute('position', `0 ${this.hitboxSize.height/2} 0`);
-            hitboxHelper.setAttribute('opacity', '0.0'); // Make invisible in production
+            hitboxHelper.setAttribute('opacity', '0.0');
             hitboxHelper.setAttribute('color', '#00FF00');
             hitboxHelper.setAttribute('class', 'hitbox-helper');
             this.el.appendChild(hitboxHelper);
@@ -105,87 +305,6 @@ AFRAME.registerComponent('enemy-component', {
             }
         } catch (error) {
             console.error('Error setting up Yuka AI:', error);
-        }
-    },
-    updateAI: function(dt) {
-        try {
-            if (this.isDead) return;
-            if (!this.playerEntity || !this.playerEntity.object3D) return;
-            const playerPos = this.playerEntity.object3D.position;
-            const enemyPos = this.el.object3D.position;
-            const distance = new THREE.Vector3(playerPos.x - enemyPos.x, 0, playerPos.z - enemyPos.z).length();
-            if (distance <= this.data.detectionRange) {
-                if (distance <= this.data.attackRange) {
-                    if (this.currentState !== 'attack') {
-                        this.setState('attack');
-                    }
-                    this.attackPlayer();
-                    this.seekBehavior.active = false;
-                    this.separationBehavior.active = false;
-                } else {
-                    if (this.currentState !== 'chase') {
-                        this.setState('chase');
-                    }
-                    this.seekBehavior.target.copy(new YUKA.Vector3(playerPos.x, 0, playerPos.z));
-                    this.seekBehavior.active = true;
-                    this.separationBehavior.active = true;
-                }
-            } else {
-                if (this.currentState !== 'idle') {
-                    this.setState('idle');
-                }
-                this.seekBehavior.active = false;
-                this.separationBehavior.active = false;
-            }
-            this.el.object3D.position.x = this.vehicle.position.x;
-            this.el.object3D.position.z = this.vehicle.position.z;
-            if ((this.currentState === 'chase' || this.currentState === 'attack') && distance > 0.1) {
-                const lookAt = new THREE.Vector3(playerPos.x, enemyPos.y, playerPos.z);
-                this.el.object3D.lookAt(lookAt);
-            }
-            const now = performance.now();
-            if (now - this.lastObstacleCheck > this.obstacleCheckInterval) {
-                this.checkIfStuck(now);
-                this.lastObstacleCheck = now;
-            }
-        } catch (error) {
-            console.error('Error updating AI:', error);
-        }
-    },
-    checkIfStuck: function(now) {
-        try {
-            if (this.currentState !== 'chase') {
-                this.stuckTime = 0;
-                this.lastPosition.copy(this.vehicle.position);
-                return;
-            }
-            const distanceMoved = this.lastPosition.distanceTo(new THREE.Vector3(this.vehicle.position.x, this.vehicle.position.y, this.vehicle.position.z));
-            if (distanceMoved < 0.05) {
-                this.stuckTime += this.obstacleCheckInterval;
-                if (this.stuckTime > this.stuckThreshold) {
-                    this.tryToUnstick();
-                    this.stuckTime = 0;
-                }
-            } else {
-                this.stuckTime = 0;
-            }
-            this.lastPosition.copy(this.vehicle.position);
-        } catch (error) {
-            console.error('Error checking if stuck:', error);
-        }
-    },
-    tryToUnstick: function() {
-        try {
-            const jitterAmount = 0.5;
-            this.vehicle.position.x += (Math.random() * 2 - 1) * jitterAmount;
-            this.vehicle.position.z += (Math.random() * 2 - 1) * jitterAmount;
-            const originalSpeed = this.vehicle.maxSpeed;
-            this.vehicle.maxSpeed *= 1.5;
-            setTimeout(() => {
-                this.vehicle.maxSpeed = originalSpeed;
-            }, 500);
-        } catch (error) {
-            console.error('Error trying to unstick:', error);
         }
     },
     setState: function(state) {
@@ -220,12 +339,10 @@ AFRAME.registerComponent('enemy-component', {
     },
     createHealthBar: function() {
         try {
-            // Create container for the health bar
             const healthBarContainer = document.createElement('a-entity');
             healthBarContainer.setAttribute('position', '0 2.3 0');
             healthBarContainer.setAttribute('id', 'health-bar-container');
 
-            // Create background for the health bar
             const healthBarBg = document.createElement('a-plane');
             healthBarBg.setAttribute('width', '1');
             healthBarBg.setAttribute('height', '0.1');
@@ -233,16 +350,14 @@ AFRAME.registerComponent('enemy-component', {
             healthBarBg.setAttribute('opacity', '0.7');
             healthBarContainer.appendChild(healthBarBg);
 
-            // Create the actual health bar
             const healthBar = document.createElement('a-plane');
             healthBar.setAttribute('width', '0.98');
             healthBar.setAttribute('height', '0.08');
             healthBar.setAttribute('color', '#00FF00');
-            healthBar.setAttribute('position', '0 0 0.001'); // Slightly in front of background
+            healthBar.setAttribute('position', '0 0 0.001');
             healthBar.setAttribute('id', 'health-bar');
             healthBarContainer.appendChild(healthBar);
 
-            // Make health bar always face the camera
             healthBarContainer.setAttribute('look-at', '[camera]');
 
             this.el.appendChild(healthBarContainer);
@@ -250,7 +365,6 @@ AFRAME.registerComponent('enemy-component', {
             console.error('Error creating health bar:', error);
         }
     },
-
     updateHealthBar: function() {
         try {
             const healthBar = this.el.querySelector('#health-bar');
@@ -262,68 +376,57 @@ AFRAME.registerComponent('enemy-component', {
             healthBar.setAttribute('width', width);
             healthBar.setAttribute('position', `${(width - 0.98) / 2} 0 0.001`);
 
-            // Change color based on health percentage
             if (healthPercent <= 0.25) {
-                healthBar.setAttribute('color', '#FF0000'); // Red
+                healthBar.setAttribute('color', '#FF0000');
             } else if (healthPercent <= 0.5) {
-                healthBar.setAttribute('color', '#FFFF00'); // Yellow
+                healthBar.setAttribute('color', '#FFFF00');
             } else {
-                healthBar.setAttribute('color', '#00FF00'); // Green
+                healthBar.setAttribute('color', '#00FF00');
             }
         } catch (error) {
             console.error('Error updating health bar:', error);
         }
     },
-
     takeDamage: function(amount, hitPosition) {
         try {
             if (this.isDead) return;
 
             const oldHealth = this.health;
-            this.health = Math.max(0, this.health - amount); // Ensure health doesn't go below 0
+            this.health = Math.max(0, this.health - amount);
             this.lastDamageTime = performance.now();
-            
-            console.log(`ENEMY HIT! Damage: ${amount}, Health: ${oldHealth} → ${this.health}, Max: ${this.maxHealth}`);
 
-            // Visual feedback at hit location if provided
+            console.log(`ENEMY HIT! Damage: ${amount}, Health: ${oldHealth} -> ${this.health}, Max: ${this.maxHealth}`);
+
             if (hitPosition) {
                 this.createHitEffect(hitPosition);
                 this.showDamageNumber(amount, hitPosition);
             }
 
-            // Update health bar
             this.updateHealthBar();
 
-            // Flash effect on enemy - make more intense for big hits
             const flashIntensity = amount > 20 ? 200 : 100;
             this.flashColor('white', this.currentState === 'idle' ? 'red' : 'orange', flashIntensity);
 
-            // Apply hit force (push enemy slightly)
             if (this.playerEntity && this.playerEntity.object3D && !this.isDead) {
-            const playerPos = this.playerEntity.object3D.position;
-            const enemyPos = this.el.object3D.position;
-            const direction = new THREE.Vector3()
-                .subVectors(enemyPos, playerPos)
-                .normalize();
-            
-                // Apply small movement in direction away from player
-                // Scale by damage amount for bigger pushback on bigger hits
+                const playerPos = this.playerEntity.object3D.position;
+                const enemyPos = this.el.object3D.position;
+                const direction = new THREE.Vector3()
+                    .subVectors(enemyPos, playerPos)
+                    .normalize();
+
                 const pushForce = 0.3 * (amount / 25);
-            this.vehicle.position.x += direction.x * pushForce;
+                this.vehicle.position.x += direction.x * pushForce;
                 this.vehicle.position.z += direction.z * pushForce;
             }
 
-            // Check if enemy should die - make this very explicit
             if (this.health <= 0) {
-            console.log('ENEMY KILLED! Health reached zero.');
-            this.die();
-            return; // Exit early since enemy is dead
+                console.log('ENEMY KILLED! Health reached zero.');
+                this.die();
+                return;
             } else {
-                // Log remaining health percentage
                 const healthPercent = Math.floor((this.health / this.maxHealth) * 100);
                 console.log(`Enemy at ${healthPercent}% health (${this.health}/${this.maxHealth})`);
-                
-                // Set to chase if not already chasing
+
                 this.setState('chase');
                 if (this.playerEntity && this.playerEntity.object3D) {
                     const playerPos = this.playerEntity.object3D.position;
@@ -346,7 +449,6 @@ AFRAME.registerComponent('enemy-component', {
             damageText.setAttribute('scale', '0.5 0.5 0.5');
             damageText.setAttribute('look-at', '[camera]');
 
-            // Animation to float upward and fade out
             damageText.setAttribute('animation__position', {
                 property: 'position.y',
                 to: position.y + 1,
@@ -364,7 +466,6 @@ AFRAME.registerComponent('enemy-component', {
 
             document.querySelector('a-scene').appendChild(damageText);
 
-            // Remove after animation completes
             setTimeout(() => {
                 if (damageText.parentNode) {
                     damageText.parentNode.removeChild(damageText);
@@ -374,25 +475,22 @@ AFRAME.registerComponent('enemy-component', {
             console.error('Error showing damage number:', error);
         }
     },
-
     createHitEffect: function(position) {
         try {
-            // Create enhanced blood splatter effect
             const hitEffect = document.createElement('a-entity');
             hitEffect.setAttribute('position', position);
             hitEffect.setAttribute('particle-system', {
                 preset: 'dust',
-                particleCount: 30, // Increased particles
-                color: '#900,#f00', // Red color variations 
-                size: 0.15, // Larger particles
+                particleCount: 30,
+                color: '#900,#f00',
+                size: 0.15,
                 duration: 0.5,
                 direction: 'normal',
-                velocity: 1.5, // Faster velocity
-                spread: 1.5 // Wider spread
+                velocity: 1.5,
+                spread: 1.5
             });
             document.querySelector('a-scene').appendChild(hitEffect);
 
-            // Remove after animation completes
             setTimeout(() => {
                 if (hitEffect.parentNode) {
                     hitEffect.parentNode.removeChild(hitEffect);
@@ -423,11 +521,9 @@ AFRAME.registerComponent('enemy-component', {
             this.isDead = true;
             console.log('Enemy killed!');
 
-            // Hide health bar
             const healthBar = this.el.querySelector('#health-bar-container');
             if (healthBar) healthBar.setAttribute('visible', false);
 
-            // Change color of body and head to indicate death
             const bodyEl = this.el.querySelector('.enemy-body');
             const headEl = this.el.querySelector('.enemy-head');
             const hitboxHelper = this.el.querySelector('.hitbox-helper');
@@ -436,18 +532,15 @@ AFRAME.registerComponent('enemy-component', {
             if (headEl) headEl.setAttribute('color', 'black');
             if (hitboxHelper) hitboxHelper.setAttribute('visible', false);
 
-            // Disable AI behaviors
             if (this.seekBehavior) this.seekBehavior.active = false;
             if (this.separationBehavior) this.separationBehavior.active = false;
 
-            // Notify game manager
             const gameManager = document.querySelector('[game-manager]');
             if (gameManager && gameManager.components['game-manager']) {
                 gameManager.components['game-manager'].entityManager.remove(this.vehicle);
                 gameManager.components['game-manager'].enemyKilled(this);
             }
 
-            // Create death particles
             const position = this.el.object3D.position;
             const deathEffect = document.createElement('a-entity');
             deathEffect.setAttribute('position', position);
@@ -462,7 +555,6 @@ AFRAME.registerComponent('enemy-component', {
             });
             document.querySelector('a-scene').appendChild(deathEffect);
 
-            // Fall and fade animation sequence
             this.el.setAttribute('animation__fall', { property: 'rotation.z', to: 90, dur: 1000, easing: 'easeOutQuad' });
             setTimeout(() => {
                 this.el.setAttribute('animation__fade', { property: 'scale', to: '0 0 0', dur: 1000, easing: 'easeInQuad' });
@@ -480,17 +572,15 @@ AFRAME.registerComponent('enemy-component', {
         try {
             const dt = delta / 1000;
             this.updateAI(dt);
-            this.updateHitbox(); // Keep hitbox updated with entity position
+            this.updateHitbox();
 
-            // Update health bar to face camera
             const healthBarContainer = this.el.querySelector('#health-bar-container');
             if (healthBarContainer) {
                 healthBarContainer.setAttribute('look-at', '[camera]');
             }
 
-            // Add hit reaction - enemies shake slightly when recently hit
             const timeSinceHit = performance.now() - this.lastDamageTime;
-            if (timeSinceHit < 300 && !this.isDead) { // Only shake for 300ms after being hit
+            if (timeSinceHit < 300 && !this.isDead) {
                 const shakeMagnitude = 0.03;
                 this.el.object3D.position.x += (Math.random() - 0.5) * shakeMagnitude;
                 this.el.object3D.position.z += (Math.random() - 0.5) * shakeMagnitude;
@@ -517,23 +607,17 @@ AFRAME.registerComponent('enemy-component', {
                 pos.z + halfDepth
             );
 
-            // Update the visual hitbox helper if it exists
             const hitboxHelper = this.el.querySelector('.hitbox-helper');
             if (hitboxHelper) {
-                // Make the hitbox helper match the actual hitbox size
                 hitboxHelper.setAttribute('width', this.hitboxSize.width);
                 hitboxHelper.setAttribute('height', this.hitboxSize.height);
                 hitboxHelper.setAttribute('depth', this.hitboxSize.depth);
                 hitboxHelper.setAttribute('position', `0 ${this.hitboxSize.height/2} 0`);
 
-                // Make sure it's not blocking raycasts
                 if (!hitboxHelper.hasAttribute('raycast-target')) {
                     hitboxHelper.setAttribute('raycast-target', 'false');
                 }
             }
-
-            // Debug message (uncomment when needed for debugging)
-            // console.log('Updated enemy hitbox', this.hitbox);
         } catch (error) {
             console.error('Error updating hitbox:', error);
         }
